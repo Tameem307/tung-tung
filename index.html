@@ -854,6 +854,8 @@ function tryAutoLogin(){
         updateUserDisplay();checkDevAccess();
     }).catch(()=>{});
 }
+const hacksPanel=document.getElementById('hacks-panel');
+const adminOs=document.getElementById('admin-os');
 tryAutoLogin();
 
 
@@ -2574,7 +2576,7 @@ window.addEventListener('keydown',e=>{if(e.code==='Escape'&&gameState!==STATE.SW
 // ==========================================
 // RANK / DEV ACCESS
 // ==========================================
-const hacksPanel=document.getElementById('hacks-panel'),adminOs=document.getElementById('admin-os');
+
 document.getElementById('os-minimize').addEventListener('click',()=>{
     const exp=adminOs.classList.toggle('expanded');
     document.getElementById('os-minimize').innerText=exp?'▼':'▲';document.getElementById('os-minimize').title=exp?'Minimize':'Expand';
@@ -2930,5 +2932,4 @@ document.getElementById('pack-open-modal').addEventListener('mouseup',e=>e.stopP
 </script>
 </body>
 </html>
-
 
