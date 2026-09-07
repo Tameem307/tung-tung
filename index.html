@@ -461,7 +461,6 @@
 
 
 <script>
-var hacksPanel, adminOs;
 // ==========================================
 // CLOUD DB CONFIG
 // ==========================================
@@ -855,8 +854,8 @@ function tryAutoLogin(){
         updateUserDisplay();checkDevAccess();
     }).catch(()=>{});
 }
-const hacksPanel=document.getElementById('hacks-panel');
-const adminOs=document.getElementById('admin-os');
+var hacksPanel=document.getElementById('hacks-panel');
+var adminOs=document.getElementById('admin-os');
 tryAutoLogin();
 
 
