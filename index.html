@@ -2607,6 +2607,155 @@ function checkDevAccess(){
 
 
 // ==========================================
+
+// ==========================================
+// SYNTH-CORE APEX — SECURITY PATCH v1
+// ==========================================
+
+async function _verifyRank(requiredRank) {
+    if (!currentUserEmail) return false;
+    const db = await syncAndGetDB();
+    if (!db) return false;
+    const acc = db[currentUserEmail];
+    if (!acc || acc.banned) { logout(); return false; }
+    let serverRank;
+    if (OWNER_EMAILS.includes(currentUserEmail))                serverRank = 'owner';
+    else if (HARDCODED_ADMIN_EMAILS.includes(currentUserEmail)) serverRank = 'admin';
+    else                                                         serverRank = acc.rank || 'player';
+    currentUserRank = serverRank;
+    updateUserDisplay();
+    checkDevAccess();
+    const RANK_WEIGHT = { player: 0, admin: 1, owner: 2 };
+    return (RANK_WEIGHT[serverRank] ?? 0) >= (RANK_WEIGHT[requiredRank] ?? 99);
+}
+
+window.openRegistry = async function () {
+    const isVerified = await _verifyRank('admin');
+    if (!isVerified) { await customAlert('Access denied. Rank verified server-side.', '🚫'); return; }
+    const modal = document.getElementById('registry-modal');
+    const list  = document.getElementById('registry-list');
+    modal.classList.remove('hidden');
+    list.innerHTML = "<p style='color:var(--cyan);text-align:center;'>Fetching...</p>";
+    const db = await syncAndGetDB();
+    if (!db) { list.innerHTML = "<p style='color:var(--red);text-align:center;'>Failed.</p>"; return; }
+    list.innerHTML = '';
+    const isOwner = currentUserRank === 'owner';
+    Object.keys(db).forEach(email => {
+        const acc = db[email];
+        const ar  = OWNER_EMAILS.includes(email) ? 'owner'
+                  : HARDCODED_ADMIN_EMAILS.includes(email) ? 'admin'
+                  : (acc.rank || 'player');
+        const prot = (ar === 'admin' || ar === 'owner') && !isOwner;
+        const row  = document.createElement('div');
+        row.className = 'db-item';
+        row.innerHTML = '<div class="db-info"><strong>' + email + '</strong>' + getRankLabel(ar) + '<br><span style="color:#666;">Banned: ' + acc.banned + '</span></div>'
+            + '<div class="db-actions">' + (prot ? '<span style="color:#444;font-size:0.75rem;padding-right:10px;">PROTECTED</span>'
+            : '<button class="btn" onclick="toggleBanUser(\'' + email + '\')">' + (acc.banned ? 'Unban' : 'Ban') + '</button>'
+            + '<button class="btn" style="color:var(--red);" onclick="deleteUser(\'' + email + '\')" >Delete</button>') + '</div>';
+        list.appendChild(row);
+    });
+};
+
+window.openOwnerPanel = async function () {
+    const isVerified = await _verifyRank('owner');
+    if (!isVerified) { await customAlert('Access denied. Owner rank required (server-verified).', '🚫'); return; }
+    const modal = document.getElementById('owner-panel-modal');
+    const list  = document.getElementById('owner-panel-list');
+    modal.classList.remove('hidden');
+    list.innerHTML = "<p style='color:var(--cyan);text-align:center;padding:20px;'>Loading...</p>";
+    const db = await syncAndGetDB();
+    if (!db) { list.innerHTML = "<p style='color:var(--red);text-align:center;'>Failed.</p>"; return; }
+    list.innerHTML = '';
+    Object.keys(db).forEach(email => {
+        const acc  = db[email];
+        const ar   = OWNER_EMAILS.includes(email) ? 'owner' : HARDCODED_ADMIN_EMAILS.includes(email) ? 'admin' : (acc.rank || 'player');
+        const hco  = OWNER_EMAILS.includes(email);
+        const hca  = HARDCODED_ADMIN_EMAILS.includes(email);
+        const isMe = email === currentUserEmail;
+        const opts = ['player','admin','owner'].map(r => '<option value="' + r + '"' + (r===ar?' selected':'') + '>' + r.toUpperCase() + '</option>').join('');
+        const row  = document.createElement('div');
+        row.className = 'db-item';
+        row.innerHTML = '<div class="db-info" style="flex:1;"><strong>' + email + '</strong>' + (isMe ? ' (you)' : '') + '<br>Current rank: ' + getRankLabel(ar) + '</div>'
+            + '<div class="rank-row">' + ((hco||hca) ? '<span style="color:#444;font-size:0.75rem;">PROTECTED</span>'
+            : '<select class="rank-select" id="rank-sel-' + CSS.escape(email) + '">' + opts + '</select>'
+            + '<button class="btn rank-apply-btn" onclick="changeUserRank(\'' + email + '\')" >Apply</button>') + '</div>';
+        list.appendChild(row);
+    });
+};
+
+window.changeUserRank = async function (email) {
+    const isVerified = await _verifyRank('owner');
+    if (!isVerified) { await customAlert('Access denied.', '🚫'); return; }
+    if (OWNER_EMAILS.includes(email) || HARDCODED_ADMIN_EMAILS.includes(email)) { await customAlert('Cannot change hardcoded rank.', '🚫'); return; }
+    const sel = document.getElementById('rank-sel-' + CSS.escape(email));
+    if (!sel) return;
+    const nr = sel.value;
+    const ok = await customConfirm('Change rank of:\n' + email + '\n\nNew rank: ' + nr.toUpperCase(), nr==='owner'?'⚡':nr==='admin'?'🔧':'👤');
+    if (!ok) return;
+    const db = await syncAndGetDB();
+    if (!db || !db[email]) { await customAlert('Account not found.', '❌'); return; }
+    db[email].rank = nr;
+    await syncAndSaveDB(db);
+    await customAlert('✓ Rank updated.', '✅');
+    openOwnerPanel();
+};
+
+window.toggleBanUser = async function (email) {
+    const isVerified = await _verifyRank('admin');
+    if (!isVerified) { await customAlert('Access denied.', '🚫'); return; }
+    const ok = await customConfirm('Change ban status for:\n' + email + '?');
+    if (!ok) return;
+    const db = await syncAndGetDB();
+    if (!db) { await customAlert('Could not connect.', '❌'); return; }
+    if (!db[email]) { await customAlert('Account not found.', '❌'); return; }
+    const ar = OWNER_EMAILS.includes(email) ? 'owner' : HARDCODED_ADMIN_EMAILS.includes(email) ? 'admin' : (db[email].rank || 'player');
+    if ((ar === 'admin' || ar === 'owner') && currentUserRank !== 'owner') { await customAlert('Cannot ban admins/owners. Owner rank required.', '🚫'); return; }
+    db[email].banned = !db[email].banned;
+    await syncAndSaveDB(db);
+    await customAlert('✓ Updated.', '✅');
+    openRegistry();
+};
+
+window.deleteUser = async function (email) {
+    const isVerified = await _verifyRank('admin');
+    if (!isVerified) { await customAlert('Access denied.', '🚫'); return; }
+    const ar = OWNER_EMAILS.includes(email) ? 'owner' : HARDCODED_ADMIN_EMAILS.includes(email) ? 'admin' : 'player';
+    if ((ar === 'admin' || ar === 'owner') && currentUserRank !== 'owner') { await customAlert('Cannot delete admins/owners.', '🚫'); return; }
+    const ok = await customConfirm('⚠️ PERMANENT DELETE\n\n' + email + '\n\nCannot be undone.', '🗑️');
+    if (!ok) return;
+    const db = await syncAndGetDB();
+    if (!db || !db[email]) { await customAlert('Not found.', '❌'); return; }
+    delete db[email];
+    await syncAndSaveDB(db);
+    await customAlert('✓ Deleted.', '✅');
+    openRegistry();
+};
+
+(function patchHackButtons() {
+    function guarded(id, rank, fn) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const clone = el.cloneNode(true);
+        el.parentNode.replaceChild(clone, el);
+        clone.addEventListener('click', async () => {
+            const ok = await _verifyRank(rank);
+            if (!ok) { await customAlert('Access denied.', '🚫'); return; }
+            fn(clone);
+        });
+    }
+    guarded('hack-god',          'admin', (el) => { if (Entities.player) { Entities.player.godMode = !Entities.player.godMode; el.classList.toggle('active'); } });
+    guarded('hack-heal',         'admin', ()   => { if (Entities.player) { Entities.player.hp = Entities.player.maxHp; updateHUD(); } });
+    guarded('hack-combo',        'admin', ()   => { Session.combo = 100; Session.comboTimer = 10.0; updateHUD(); });
+    guarded('hack-chest',        'admin', ()   => { if (Entities.player) { for (let i=0;i<3;i++) { let a=Math.random()*Math.PI*2,d=200; Entities.chests.push(new Chest(Entities.player.x+Math.cos(a)*d,Entities.player.y+Math.sin(a)*d,Math.random()>0.5?'blue':'red')); } } });
+    guarded('hack-orbs',         'admin', ()   => { if (Entities.player) { for (let i=0;i<20;i++) { let a=Math.random()*Math.PI*2,d=Math.random()*300+100; Entities.orbs.push(new Orb(Entities.player.x+Math.cos(a)*d,Entities.player.y+Math.sin(a)*d)); } } });
+    guarded('hack-lives',        'admin', ()   => { Session.lives=3; updateLivesHUD(); });
+    guarded('hack-next-wave',    'admin', ()   => { if (!isEndlessMode) { Entities.enemies=[]; Session.wavePause=true; Session.wavePauseTimer=0.1; } });
+    guarded('hack-unlock-skins', 'admin', ()   => { SKINS_DB.filter(s=>s.rarity!=='admin').forEach(s=>{ if (!playerOwnedSkins.includes(s.id)) playerOwnedSkins.push(s.id); }); saveSkinData(); });
+    guarded('hack-give-admin-skins','owner',() => { SKINS_DB.forEach(s=>{ if (!playerOwnedSkins.includes(s.id)) playerOwnedSkins.push(s.id); }); saveSkinData(); });
+    guarded('hack-give-coins',   'admin', ()   => { playerCoins+=9999; updateCoinHUD(); showCoinToast(9999); saveSkinData(); });
+    guarded('hack-god-arm',      'admin', ()   => { if (Entities.player) { ADMIN_ARMORS.forEach(a=>{ Entities.player.armor[a.slot]=a; }); updateHUD(); savePlayerData(); } });
+})();
+
 // HACK BUTTONS
 // ==========================================
 document.getElementById('hack-god').addEventListener('click',e=>{if(Entities.player)Entities.player.godMode=!Entities.player.godMode;e.target.classList.toggle('active');});
@@ -2932,4 +3081,3 @@ document.getElementById('pack-open-modal').addEventListener('mouseup',e=>e.stopP
 </script>
 </body>
 </html>
-
